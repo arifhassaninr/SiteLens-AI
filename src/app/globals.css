@@ -29,3 +29,54 @@
 .report-url,.break-anywhere{overflow-wrap:anywhere}.extra-card .extra-actions{margin:0}.extra-card .extra-button{font-size:12px;padding:10px 13px}.extra-actions button:disabled{opacity:.5;cursor:not-allowed}
 @media(max-width:600px){.extra-page{padding:35px 16px}.extra-page h1{font-size:34px}.extra-page h2{font-size:21px}.extra-grid{grid-template-columns:1fr}.extra-card{padding:19px}.account-form,.ai-panel,.share-panel{padding:18px}.extra-actions{flex-direction:column;align-items:stretch}.extra-actions>*{text-align:center}.extra-page .section-chip{display:inline-flex;font-size:10px}.page-top>.extra-button{width:100%;text-align:center}}
 @media print{.ai-panel button,.share-panel,.notice,.page-top .extra-button,.extra-actions,.extra-page>a{display:none!important}.ai-panel,.extra-card{background:#fff;color:#111;border-color:#aaa}.ai-output{background:#fff;color:#111}}
+
+/* SiteLens Mobile Navigation Fix */
+@media (max-width: 790px) {
+  .site-shell .topbar {
+    position: relative;
+    z-index: 100;
+    overflow: visible;
+  }
+
+  .site-shell .mobile-menu-button {
+    display: grid;
+    place-items: center;
+    position: relative;
+    z-index: 102;
+    min-width: 44px;
+    min-height: 44px;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+
+  .site-shell .main-nav.main-nav-open {
+    display: flex;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 101;
+    width: min(310px, calc(100vw - 30px));
+    max-height: calc(100dvh - 90px);
+    overflow-y: auto;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 5px;
+    padding: 14px;
+    background: #142437;
+    border: 1px solid #3c666c;
+    border-radius: 12px;
+    box-shadow: 0 18px 45px #0009;
+  }
+
+  .site-shell .main-nav a {
+    display: block;
+    width: 100%;
+    padding: 12px;
+    border-radius: 7px;
+  }
+
+  .site-shell .main-nav a:hover {
+    background: #23414c;
+    color: #65e7d5;
+  }
+}
