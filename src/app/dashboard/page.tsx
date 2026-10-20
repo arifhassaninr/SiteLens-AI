@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { AuditResult } from "@/lib/audit";
 import { KEY, readAudits } from "@/lib/storage";
 import { fetchCloudAudits, type CloudReport } from "@/lib/cloud";
@@ -10,11 +11,13 @@ function displayHost(r: AuditResult) {
 }
 
 export default function Dashboard() {
+  const router = useRouter();
   const [local, setLocal] = useState<AuditResult[]>([]);
   const [cloud, setCloud] = useState<CloudReport[]>([]);
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(true);
   const [notice, setNotice] = useState("");
+  const [signingOut, setSigningOut] = useState(false);
   useEffect(() => {
     setLocal(readAudits());
     const db = getBrowserSupabase();
@@ -24,7 +27,34 @@ export default function Dashboard() {
       return fetchCloudAudits();
     }).then(setCloud).catch(e => setNotice(e instanceof Error ? e.message : "Could not load cloud reports."))
       .finally(() => setBusy(false));
+
+    const { data: { subscription } } = db.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") {
+        setEmail("");
+        setCloud([]);
+      }
+    });
+    return () => subscription.unsubscribe();
   }, []);
+  async function signOut() {
+    const db = getBrowserSupabase();
+    if (!db || signingOut) return;
+    setSigningOut(true);
+    setNotice("");
+    try {
+      const { error } = await db.auth.signOut();
+      if (error) throw error;
+      setEmail("");
+      setCloud([]);
+      router.replace("/auth");
+      router.refresh();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not sign out. Try again.");
+    } finally {
+      setSigningOut(false);
+    }
+  }
+
   async function removeReport(id: string) {
     if (!confirm("Delete this cloud report?")) return;
     const db = getBrowserSupabase(); if (!db) return;
@@ -34,7 +64,16 @@ export default function Dashboard() {
   }
   return <main className="extra-page"><a href="/">← SiteLens</a>
     <div className="page-top"><div><p className="section-chip">YOUR WORKSPACE</p><h1>Saved audits</h1><p>Local scans stay in this browser. Sign in to sync new audits privately to Supabase.</p></div><a className="extra-button" href="/audit">+ New audit</a></div>
-    <div className="notice">{email ? `Signed in as ${email}. New audits can sync to your account.` : "Not signed in. Local reports still work. "}<a href="/auth">{email ? "Account settings" : "Sign in / sign up"}</a></div>
+    <div className="notice" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+      <span>{email ? `Signed in as ${email}. New audits can sync to your account.` : "Not signed in. Local reports still work."}</span>
+      {email ? (
+        <button type="button" className="subtle-button" onClick={signOut} disabled={signingOut}>
+          {signingOut ? "Signing out..." : "Sign out"}
+        </button>
+      ) : (
+        <a className="extra-button" href="/auth">Log in / Sign up</a>
+      )}
+    </div>
     {notice && <p role="alert" className="notice warning">{notice}</p>}
     <h2>Cloud reports {busy && <span className="muted">(loading...)</span>}</h2>
     {cloud.length ? <div className="extra-grid">{cloud.map(r => <article className="extra-card" key={r.id}>
