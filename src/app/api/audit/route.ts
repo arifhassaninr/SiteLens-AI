@@ -107,22 +107,58 @@ export async function POST(req: Request) {
     const values = input as Record<string, unknown>;
     const url = normalizePublicUrl(values.url);
     const strategy: Strategy = values.strategy === "desktop" ? "desktop" : "mobile";
-    const endpoint = new URL("https://pagespeedonline.googleapis.com/pagespeedonline/v5/runPagespeed");
-    endpoint.searchParams.set("url", url);
-    endpoint.searchParams.set("strategy", strategy);
-    endpoint.searchParams.set("locale", "en");
-    for (const category of ["performance", "accessibility", "best-practices", "seo"]) {
-      endpoint.searchParams.append("category", category);
-    }
-    if (process.env.PAGESPEED_API_KEY) {
-      endpoint.searchParams.set("key", process.env.PAGESPEED_API_KEY);
+    // Run the same Lighthouse audit for either canonical host variant.
+    // No direct request is made from this server to the user-supplied website.
+    async function runPageSpeed(targetUrl: string) {
+      const endpoint = new URL("https://pagespeedonline.googleapis.com/pagespeedonline/v5/runPagespeed");
+      endpoint.searchParams.set("url", targetUrl);
+      endpoint.searchParams.set("strategy", strategy);
+      endpoint.searchParams.set("locale", "en");
+      for (const category of ["performance", "accessibility", "best-practices", "seo"]) {
+        endpoint.searchParams.append("category", category);
+      }
+      if (process.env.PAGESPEED_API_KEY) {
+        endpoint.searchParams.set("key", process.env.PAGESPEED_API_KEY);
+      }
+      const response = await fetch(endpoint.toString(), {
+        cache: "no-store",
+        signal: AbortSignal.timeout(90_000),
+      });
+      const data = (await response.json()) as LhResponse;
+      return { response, data };
     }
 
-    const response = await fetch(endpoint.toString(), {
-      cache: "no-store",
-      signal: AbortSignal.timeout(90_000),
-    });
-    const data = (await response.json()) as LhResponse;
+    let auditedUrl = url;
+    let { response, data } = await runPageSpeed(auditedUrl);
+
+    // If Lighthouse cannot load the document, retry with/without www once.
+    // Do NOT retry on authentication, quota or ordinary low scores.
+    const failure = [data.error?.message, data.lighthouseResult?.runtimeError?.message]
+      .filter(Boolean).join(" ");
+    const parsedUrl = new URL(url);
+    const isDocumentLoadFailure = /FAILED_DOCUMENT_REQUEST|ERR_CONNECTION_FAILED|ERR_NAME_NOT_RESOLVED/i.test(failure);
+    let alternative: string | null = null;
+    if (parsedUrl.hostname.startsWith("www.")) {
+      parsedUrl.hostname = parsedUrl.hostname.slice(4);
+      alternative = parsedUrl.toString();
+    } else if (parsedUrl.hostname.split(".").length === 2) {
+      parsedUrl.hostname = `www.${parsedUrl.hostname}`;
+      alternative = parsedUrl.toString();
+    }
+
+    if (isDocumentLoadFailure && alternative) {
+      try {
+        const retry = await runPageSpeed(alternative);
+        if (retry.response.ok && !retry.data.error &&
+            !retry.data.lighthouseResult?.runtimeError && retry.data.lighthouseResult?.categories) {
+          auditedUrl = alternative;
+          response = retry.response;
+          data = retry.data;
+        }
+      } catch {
+        // Keep original Lighthouse error if the alternative host also fails.
+      }
+    }
     if (!response.ok || data.error) {
       const message = data.error?.message ?? "PageSpeed service is temporarily unavailable.";
       return NextResponse.json({ error: message.slice(0, 260) }, { status: response.status === 429 ? 429 : 502 });
@@ -134,8 +170,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No audit result returned. Try a different public URL." }, { status: 502 });
     }
     const report: AuditResult = {
-      url,
-      finalUrl: data.lighthouseResult.finalUrl ?? url,
+      url: auditedUrl,
+      finalUrl: data.lighthouseResult.finalUrl ?? auditedUrl,
       strategy,
       scores: {
         performance: score(data, "performance"),
